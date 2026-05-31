@@ -1,182 +1,167 @@
 package com.q8js.deliveryrevenue.util
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
-import android.util.Base64
-import com.google.gson.Gson
-import com.google.gson.annotations.SerializedName
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.Text
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
+import com.q8js.deliveryrevenue.data.ExtractedAmount
+import com.q8js.deliveryrevenue.data.PlatformType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.ByteArrayOutputStream
-import java.util.concurrent.TimeUnit
+import java.io.IOException
+import java.time.LocalTime
 
 object OcrProcessor {
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
-
-    private val gson = Gson()
-    private const val VISION_URL = "https://vision.googleapis.com/v1/images:annotate"
-
-    // ── Public API ────────────────────────────────────────────────────────────
-
+    @Suppress("UNUSED_PARAMETER")
     suspend fun extractAmounts(
         context: Context,
         uri: Uri,
         apiKey: String
-    ): Pair<List<Double>, String> = withContext(Dispatchers.IO) {
-        if (apiKey.isBlank()) throw IllegalStateException("請在設定中填入 Cloud Vision API Key")
-        val base64Image = encodeImageToBase64(context, uri)
-        val rawText = callVisionApi(base64Image, apiKey)
-        val amounts = parseAmounts(rawText)
-        Pair(amounts, rawText)
-    }
+    ): Pair<List<ExtractedAmount>, String> = withContext(Dispatchers.IO) {
+        try {
+            val image = InputImage.fromFilePath(context, uri)
+            val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+            val result = Tasks.await(recognizer.process(image))
 
-    // ── Cloud Vision REST call ────────────────────────────────────────────────
+            // 改用「座標幾何雷達法」精準鎖定金額與平台
+            val amounts = parseAmountsFromGeometry(result)
 
-    private fun callVisionApi(base64Image: String, apiKey: String): String {
-        val requestBody = VisionRequest(
-            requests = listOf(
-                AnnotateImageRequest(
-                    image = VisionImage(content = base64Image),
-                    features = listOf(
-                        Feature(type = "DOCUMENT_TEXT_DETECTION", maxResults = 1)
-                    ),
-                    imageContext = ImageContext(languageHints = listOf("zh-TW", "zh-CN", "en"))
-                )
-            )
-        )
+            return@withContext Pair(amounts, result.text)
 
-        val json = gson.toJson(requestBody)
-        val body = json.toRequestBody("application/json".toMediaType())
-        val request = Request.Builder()
-            .url("$VISION_URL?key=$apiKey")
-            .post(body)
-            .build()
-
-        val response = client.newCall(request).execute()
-        val responseBody = response.body?.string() ?: throw RuntimeException("Cloud Vision API 回應為空")
-
-        if (!response.isSuccessful) {
-            val err = runCatching { gson.fromJson(responseBody, VisionErrorResponse::class.java) }.getOrNull()
-            throw RuntimeException("Cloud Vision API 錯誤：${err?.error?.message ?: "HTTP ${response.code}"}")
+        } catch (e: IOException) {
+            e.printStackTrace()
+            return@withContext Pair(emptyList(), "圖片讀取失敗: ${e.message}")
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return@withContext Pair(emptyList(), "文字辨識失敗: ${e.message}")
         }
-
-        val visionResponse = gson.fromJson(responseBody, VisionResponse::class.java)
-        val fullText = visionResponse.responses?.firstOrNull()?.fullTextAnnotation?.text
-        val simpleText = visionResponse.responses?.firstOrNull()?.textAnnotations?.firstOrNull()?.description
-        return fullText ?: simpleText ?: ""
     }
 
-    // ── Image encoding ────────────────────────────────────────────────────────
+    private fun parseAmountsFromGeometry(result: Text): List<ExtractedAmount> {
+        val elements = mutableListOf<Text.Element>()
 
-    private fun encodeImageToBase64(context: Context, uri: Uri): String {
-        val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
-            BitmapFactory.decodeStream(stream)
-        } ?: throw IllegalArgumentException("無法載入圖片")
-
-        val resized = resizeBitmapIfNeeded(bitmap, 2048)
-        val baos = ByteArrayOutputStream()
-        resized.compress(Bitmap.CompressFormat.JPEG, 92, baos)
-        return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
-    }
-
-    private fun resizeBitmapIfNeeded(bitmap: Bitmap, maxDimension: Int): Bitmap {
-        val w = bitmap.width; val h = bitmap.height
-        if (w <= maxDimension && h <= maxDimension) return bitmap
-        val scale = maxDimension.toFloat() / maxOf(w, h)
-        return Bitmap.createScaledBitmap(bitmap, (w * scale).toInt(), (h * scale).toInt(), true)
-    }
-
-    // ── Amount parsing ────────────────────────────────────────────────────────
-
-    /**
-     * Parse monetary amounts from Cloud Vision OCR text.
-     *
-     * Handles:
-     *   Uber Eats:  小計 $123 / 總計 $153
-     *   Foodpanda:  訂單金額 NT$250
-     *   POS:        合計 1,250 / NT$1,250 / TWD 1,250
-     *
-     * Strategy: prefer 總計/合計 lines; fallback to all HIGH-confidence currency hits.
-     */
-    fun parseAmounts(text: String): List<Double> {
-        if (text.isBlank()) return emptyList()
-        val candidates = mutableListOf<AmountCandidate>()
-
-        for ((idx, line) in text.lines().withIndex()) {
-            val trimmed = line.trim()
-            if (trimmed.isEmpty() || isNonMonetaryLine(trimmed)) continue
-
-            val currencyHits = extractCurrencyPrefixed(trimmed)
-            currencyHits.forEach {
-                candidates.add(AmountCandidate(it, ConfidenceLevel.HIGH, idx, trimmed))
-            }
-            if (currencyHits.isEmpty()) {
-                extractKeywordAdjacent(trimmed).forEach {
-                    candidates.add(AmountCandidate(it, ConfidenceLevel.MEDIUM, idx, trimmed))
+        // 將所有辨識到的「單字(Element)」攤平收集起來
+        for (block in result.textBlocks) {
+            for (line in block.lines) {
+                for (element in line.elements) {
+                    elements.add(element)
                 }
             }
         }
 
-        val filtered = candidates.filter { it.value in 1.0..999_999.0 }
-        return deduplicateAmounts(filtered)
-    }
+        val amounts = mutableListOf<ExtractedAmount>()
+        // 擴大容錯：只要包含 panda 或 eats 就視為平台名稱，避免反光造成些微錯字
+        val platformRegex = Regex("(?i)(panda|eats)")
 
-    private fun deduplicateAmounts(candidates: List<AmountCandidate>): List<Double> {
-        if (candidates.isEmpty()) return emptyList()
-        val totalRe = Regex("""總計|合計|Total|TOTAL|grand.?total""", RegexOption.IGNORE_CASE)
-        val totalCandidates = candidates.filter { totalRe.containsMatchIn(it.sourceLine) }
-        return if (totalCandidates.isNotEmpty()) {
-            totalCandidates.map { it.value }.distinct()
-        } else {
-            candidates.filter { it.confidence == ConfidenceLevel.HIGH }
-                .map { it.value }.distinct()
-                .ifEmpty { candidates.map { it.value }.distinct() }
+        // 1. 找出所有「外送平台名稱」的單字座標
+        val platformElements = elements.filter {
+            platformRegex.containsMatchIn(it.text.replace(" ", ""))
         }
+
+        // 2. 針對每一個平台名稱錨點，往它的「右邊」尋找金額
+        for (platform in platformElements) {
+            val pBox = platform.boundingBox ?: continue
+            val platformTextNormalized = platform.text.replace(" ", "").lowercase()
+            val platformType = when {
+                platformTextNormalized.contains("panda") -> PlatformType.FOODPANDA
+                platformTextNormalized.contains("eats") -> PlatformType.UBER_EATS
+                else -> PlatformType.UNKNOWN
+            }
+
+            // 篩選出在平台名稱「右側」的所有單字
+            val rightElements = elements.filter { el ->
+                val elBox = el.boundingBox ?: return@filter false
+                // 必須在平台名稱的右邊 (使用 centerX 確保不會誤判)
+                val isToRight = elBox.centerX() > pBox.centerX()
+
+                // 必須在同一區間內 (放寬垂直容忍度到字體高度的 1.5 倍，抵抗反光造成的座標扭曲)
+                val tolerance = pBox.height() * 1.5f
+                val isAligned = Math.abs(elBox.centerY() - pBox.centerY()) < tolerance
+
+                val isDifferent = el !== platform
+
+                isToRight && isAligned && isDifferent
+            }.sortedBy { it.boundingBox!!.left } // 依照 X 座標由左至右排序
+
+            // 3. 掃描右邊的單字，找出距離最近的第一個「純數字」
+            var foundAmount: Double? = null
+            for (el in rightElements) {
+                val text = el.text.replace(" ", "")
+
+                // 避開時間欄位，改用 continue 跳過
+                if (text.contains(":")) {
+                    continue
+                }
+
+                // 濾除所有非數字字元，檢查是否為有效金額
+                val digitsOnly = text.replace(Regex("\\D"), "")
+                if (digitsOnly.isNotEmpty()) {
+                    val amount = digitsOnly.toDoubleOrNull()
+                    if (amount != null) {
+                        foundAmount = amount
+                        break // 成功找到這筆訂單的金額，結束金額搜尋
+                    }
+                }
+            }
+
+            if (foundAmount != null) {
+                // 4. 尋找與此平台錨點 Y 軸最近的「時間」文字
+                // 支援格式：HH:mm, 上午/下午 H:mm, H:mm AM/PM, H:mm等
+                val timeRegex = Regex("""(?i)(上午|下午|AM|PM)?\s*(\d{1,2})\s*:\s*(\d{2})\s*(AM|PM)?""")
+                var bestTime: LocalTime? = null
+                var minDistance = Float.MAX_VALUE
+                val maxVerticalDistance = pBox.height() * 3.0f // 容許垂直 3 倍字體高度距離
+
+                for (el in elements) {
+                    val elBox = el.boundingBox ?: continue
+                    val text = el.text.replace(" ", "")
+                    val match = timeRegex.find(text)
+                    if (match != null) {
+                        val distance = Math.abs(elBox.centerY() - pBox.centerY()).toFloat()
+                        if (distance < maxVerticalDistance && distance < minDistance) {
+                            val period1 = match.groups[1]?.value
+                            val hourStr = match.groups[2]!!.value
+                            val minStr = match.groups[3]!!.value
+                            val period2 = match.groups[4]?.value
+
+                            var hour = hourStr.toIntOrNull() ?: continue
+                            val minute = minStr.toIntOrNull() ?: continue
+
+                            val isPM = (period1 != null && (period1.contains("下午") || period1.contains("PM") || period1.contains("pm"))) ||
+                                    (period2 != null && (period2.contains("PM") || period2.contains("pm")))
+
+                            val isAM = (period1 != null && (period1.contains("上午") || period1.contains("AM") || period1.contains("am"))) ||
+                                    (period2 != null && (period2.contains("AM") || period2.contains("am")))
+
+                            if (isPM && hour < 12) {
+                                hour += 12
+                            }
+                            if (isAM && hour == 12) {
+                                hour = 0
+                            }
+
+                            try {
+                                bestTime = LocalTime.of(hour, minute)
+                                minDistance = distance
+                            } catch (e: Exception) {
+                                // 忽略不合規的時間
+                            }
+                        }
+                    }
+                }
+
+                amounts.add(ExtractedAmount(amount = foundAmount, platform = platformType, orderTime = bestTime))
+            }
+        }
+        return amounts
     }
 
-    private fun isNonMonetaryLine(line: String): Boolean {
-        if (line.matches(Regex(".*\\b\\d{8,}\\b.*")) && !line.contains(".")) return true
-        if (line.matches(Regex("\\d{1,2}:\\d{2}(:\\d{2})?(\\s*(AM|PM|上午|下午))?"))) return true
-        if (line.matches(Regex("\\+?\\d[\\d\\s\\-]{8,15}"))) return true
-        if (line.matches(Regex("\\d{4}[/\\-]\\d{1,2}[/\\-]\\d{1,2}.*"))) return true
-        return false
+    // 為了相容 ViewModel 舊的呼叫而保留，但實際上已不再使用舊版字串邏輯
+    fun parseAmounts(text: String): List<Double> {
+        return emptyList()
     }
-
-    private val currencyPrefixRe = Regex("""(?:NT\s*\$?|TWD\s*|\$)(\d{1,6}(?:,\d{3})*(?:\.\d{1,2})?)""")
-    private fun extractCurrencyPrefixed(line: String): List<Double> =
-        currencyPrefixRe.findAll(line).mapNotNull { it.groupValues[1].replace(",","").toDoubleOrNull() }.toList()
-
-    private val keywordRe = Regex(
-        """(?:訂單金額|交易金額|總金額|小計|合計|總計|金額|實收|應收|營業額|收入|subtotal|total)[^\d]*(\d{1,6}(?:,\d{3})*(?:\.\d{1,2})?)""",
-        RegexOption.IGNORE_CASE
-    )
-    private fun extractKeywordAdjacent(line: String): List<Double> =
-        keywordRe.findAll(line).mapNotNull { it.groupValues[1].replace(",","").toDoubleOrNull() }.toList()
-
-    private enum class ConfidenceLevel { HIGH, MEDIUM }
-    private data class AmountCandidate(val value: Double, val confidence: ConfidenceLevel, val lineIndex: Int, val sourceLine: String)
-
-    // ── Gson data classes ─────────────────────────────────────────────────────
-
-    data class VisionRequest(val requests: List<AnnotateImageRequest>)
-    data class AnnotateImageRequest(val image: VisionImage, val features: List<Feature>, val imageContext: ImageContext? = null)
-    data class VisionImage(val content: String)
-    data class Feature(val type: String, val maxResults: Int = 1)
-    data class ImageContext(@SerializedName("languageHints") val languageHints: List<String>)
-    data class VisionResponse(val responses: List<AnnotateImageResponse>?)
-    data class AnnotateImageResponse(val textAnnotations: List<TextAnnotation>?, val fullTextAnnotation: FullTextAnnotation?)
-    data class TextAnnotation(val description: String?)
-    data class FullTextAnnotation(val text: String?)
-    data class VisionErrorResponse(val error: VisionError?)
-    data class VisionError(val message: String?, val code: Int?)
 }

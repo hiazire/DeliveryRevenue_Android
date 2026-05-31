@@ -10,6 +10,7 @@ import com.q8js.deliveryrevenue.util.ExifUtil
 import com.q8js.deliveryrevenue.util.OcrProcessor
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.time.LocalDateTime
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -30,8 +31,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun addImages(uris: List<Uri>) {
         val context = getApplication<Application>()
         val newItems = uris.map { uri ->
-            val date = ExifUtil.extractDate(context, uri)
-            ImageItem(uri = uri, date = date)
+            val dateTime = ExifUtil.extractDateTime(context, uri)
+            ImageItem(uri = uri, dateTime = dateTime)
         }
         _imageItems.update { current -> current + newItems }
         _appState.value = AppState.Idle
@@ -85,16 +86,48 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun computeResult(items: List<ImageItem>): ProcessingResult {
-        val total = items.sumOf { it.extractedAmounts.sum() }
+        var normalFoodPanda = 0.0
+        var normalUberEats = 0.0
+        var extendedFoodPanda = 0.0
+        var extendedUberEats = 0.0
+
+        for (item in items) {
+            for (extAmount in item.extractedAmounts) {
+                val orderTime = extAmount.orderTime
+                    ?: item.dateTime?.toLocalTime()
+                    ?: java.time.LocalTime.of(12, 0)
+
+                val isExtended = !orderTime.isBefore(java.time.LocalTime.of(13, 30))
+
+                when (extAmount.platform) {
+                    PlatformType.FOODPANDA -> {
+                        if (isExtended) extendedFoodPanda += extAmount.amount
+                        else normalFoodPanda += extAmount.amount
+                    }
+                    PlatformType.UBER_EATS -> {
+                        if (isExtended) extendedUberEats += extAmount.amount
+                        else normalUberEats += extAmount.amount
+                    }
+                    PlatformType.UNKNOWN -> {}
+                }
+            }
+        }
+
+        val total = items.sumOf { it.extractedAmounts.sumOf { ext -> ext.amount } }
         val dates = items.map { it.date }.toSet()
         val hasConflict = dates.size > 1
         val primaryDate = if (!hasConflict) dates.firstOrNull() else null
+
         return ProcessingResult(
             totalAmount = total,
             imageItems = items,
             hasDateConflict = hasConflict,
             dates = dates,
-            primaryDate = primaryDate
+            primaryDate = primaryDate,
+            normalFoodPanda = normalFoodPanda,
+            normalUberEats = normalUberEats,
+            extendedFoodPanda = extendedFoodPanda,
+            extendedUberEats = extendedUberEats
         )
     }
 
@@ -108,15 +141,35 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val result = state.result
                 val cfg = settings.value
 
+                // 取得第一張照片的 LocalDate 物件
+                val firstItemDate = result.imageItems.firstOrNull()?.date
+                    ?: throw IllegalStateException("無法讀取首張圖片日期")
+
+                // 【修正 2：解決 LocalDate 轉 String】
+                // LocalDate.toString() 預設是 YYYY-MM-DD，我們將 "-" 替換為 "/" 以符合你的標題需求
+                val dateString = firstItemDate.toString().replace("-", "/")
+
                 if (result.hasDateConflict) {
                     val details = result.imageItems.joinToString("\n") { item ->
-                        "• ${item.uri.lastPathSegment ?: "圖片"}: ${item.date ?: "無日期資訊"}"
+                        val formattedDate = item.date?.toString()?.replace("-", "/") ?: "無日期資訊"
+                        "• ${item.uri.lastPathSegment ?: "圖片"}: $formattedDate"
                     }
-                    EmailSender.sendErrorEmail(cfg, result.dates, details)
+
+                    EmailSender.sendErrorEmail(cfg, details)
                 } else {
-                    val date = result.primaryDate
-                        ?: throw IllegalStateException("無法讀取圖片日期，請確認圖片包含 EXIF 資訊")
-                    EmailSender.sendSuccessEmail(cfg, result.totalAmount, date, result.imageItems.size)
+                    // 算出所有圖片中，成功抓取到的交易總筆數 (例如：第一張7筆 + 第二張2筆 = 9筆)
+                    val totalTransactionCount = result.imageItems.sumOf { it.extractedAmounts.size }
+
+                    EmailSender.sendSuccessEmail(
+                        cfg = cfg,
+                        totalAmount = result.totalAmount,
+                        date = dateString,
+                        count = totalTransactionCount,
+                        normalFoodPanda = result.normalFoodPanda,
+                        normalUberEats = result.normalUberEats,
+                        extendedFoodPanda = result.extendedFoodPanda,
+                        extendedUberEats = result.extendedUberEats
+                    )
                 }
                 _emailState.value = EmailState.Success
             } catch (e: Exception) {

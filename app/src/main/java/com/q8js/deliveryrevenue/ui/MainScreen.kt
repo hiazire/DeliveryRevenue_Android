@@ -34,6 +34,7 @@ import com.q8js.deliveryrevenue.ui.theme.*
 import java.time.format.DateTimeFormatter
 
 private val dateFmt = DateTimeFormatter.ofPattern("yyyy/MM/dd")
+private val dateTimeFmt = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -269,8 +270,8 @@ private fun ImageCard(item: ImageItem, onRemove: () -> Unit) {
                     )
                     Spacer(Modifier.width(3.dp))
                     Text(
-                        item.date?.format(dateFmt) ?: "無日期 EXIF",
-                        color = if (item.date != null) TextSecondary else ErrorColor,
+                        item.dateTime?.format(dateTimeFmt) ?: "無日期 EXIF",
+                        color = if (item.dateTime != null) TextSecondary else ErrorColor,
                         fontSize = 11.sp
                     )
                 }
@@ -289,9 +290,11 @@ private fun ImageCard(item: ImageItem, onRemove: () -> Unit) {
                         fontSize = 11.sp
                     )
                     else -> {
-                        val total = item.extractedAmounts.sum()
+                        val total = item.extractedAmounts.sumOf { it.amount }
+                        val fpCount = item.extractedAmounts.count { it.platform == PlatformType.FOODPANDA }
+                        val ueCount = item.extractedAmounts.count { it.platform == PlatformType.UBER_EATS }
                         Text(
-                            "NT$ ${"%.2f".format(total)}  (${item.extractedAmounts.size} 筆)",
+                            "NT$ ${"%.2f".format(total)}  (${item.extractedAmounts.size} 筆: FP $fpCount, UE $ueCount)",
                             color = SuccessColor,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold
@@ -397,23 +400,38 @@ private fun ResultPanel(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.Bottom
                         ) {
-                            Column {
-                                Text("總交易金額", color = TextSecondary, fontSize = 12.sp)
-                                Spacer(Modifier.height(2.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("外送平台總金額", color = TextSecondary, fontSize = 11.sp)
                                 Text(
                                     "NT$ ${"%.2f".format(result.totalAmount)}",
                                     color = Orange80,
-                                    fontSize = 28.sp,
+                                    fontSize = 24.sp,
                                     fontWeight = FontWeight.ExtraBold
                                 )
+                                Spacer(Modifier.height(4.dp))
+                                Text("【一般營業時間】", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    "FoodPanda: ${"%.0f".format(result.normalFoodPanda)} | Uber Eats: ${"%.0f".format(result.normalUberEats)}",
+                                    color = TextSecondary,
+                                    fontSize = 11.sp
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Text("【延長營業時間】", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    "FoodPanda: ${"%.0f".format(result.extendedFoodPanda)} | Uber Eats: ${"%.0f".format(result.extendedUberEats)}",
+                                    color = TextSecondary,
+                                    fontSize = 11.sp
+                                )
                                 if (result.primaryDate != null) {
+                                    Spacer(Modifier.height(4.dp))
                                     Text(
-                                        result.primaryDate.format(dateFmt),
+                                        "日期: ${result.primaryDate.format(dateFmt)}",
                                         color = TextSecondary,
-                                        fontSize = 12.sp
+                                        fontSize = 11.sp
                                     )
                                 }
                             }
+                            Spacer(Modifier.width(8.dp))
                             Button(
                                 onClick = onSendEmail,
                                 enabled = emailState !is EmailState.Sending,
