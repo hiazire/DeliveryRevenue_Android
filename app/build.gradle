@@ -65,7 +65,7 @@ android {
 }
 
 dependencies {
-    implementation 'com.google.mlkit:text-recognition-chinese:16.0.0'
+    implementation 'com.google.mlkit:text-recognition-chinese:16.0.1'
 
     // Material Components (for XML theme)
     implementation 'com.google.android.material:material:1.11.0'
