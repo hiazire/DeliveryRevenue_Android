@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ripple.rememberRipple
@@ -194,9 +195,30 @@ private fun DraggableNishikiButton(
     val tileShape = RoundedCornerShape(16.dp)
     val interactionSource = remember { MutableInteractionSource() }
 
+    // 按住不放縮小動效狀態
+    var isDragging by remember { mutableStateOf(false) }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val activePressed = isPressed || isDragging
+
+    val scale by animateFloatAsState(
+        targetValue = if (activePressed) 0.75f else 1f,
+        animationSpec = if (activePressed) {
+            // 緩慢縮小至 3/4
+            tween(durationMillis = 600, easing = EaseOutQuad)
+        } else {
+            // 快速回彈恢復
+            spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
+        },
+        label = "scale"
+    )
+
     Box(
         modifier = Modifier
             .offset { IntOffset(dragOffset.value.x.roundToInt(), (dragOffset.value.y + dropY).roundToInt()) }
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .size(width.dp, height.dp)
             .clip(tileShape)
             .background(
@@ -219,9 +241,11 @@ private fun DraggableNishikiButton(
             .pointerInput(Unit) {
                 detectDragGestures(
                     onDragStart = {
+                        isDragging = true
                         scope.launch { dragOffset.stop() }
                     },
                     onDragEnd = {
+                        isDragging = false
                         scope.launch {
                             dragOffset.animateTo(
                                 targetValue = Offset.Zero,
@@ -233,6 +257,7 @@ private fun DraggableNishikiButton(
                         }
                     },
                     onDragCancel = {
+                        isDragging = false
                         scope.launch {
                             dragOffset.animateTo(Offset.Zero, spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow))
                         }
