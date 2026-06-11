@@ -47,7 +47,10 @@ val NotoSerifTC = FontFamily(
 )
 
 @Composable
-fun HomeScreen(onNavigateToMain: () -> Unit) {
+fun HomeScreen(
+    onNavigateToMain: () -> Unit,
+    onNavigateToDailyReport: () -> Unit
+) {
     // ── 水波 shimmer（背景緩慢漂移的橢圓漸層）────────────────────────────────
     val shimmerTransition = rememberInfiniteTransition(label = "shimmer")
     val shimmerX by shimmerTransition.animateFloat(
@@ -123,7 +126,7 @@ fun HomeScreen(onNavigateToMain: () -> Unit) {
                 deepColor = NishikiCreamDeep,
                 textColor = NishikiRed,
                 dropDelay = 150,
-                onClick = { /* 無功能 */ }
+                onClick = onNavigateToDailyReport
             )
 
             Spacer(Modifier.height(24.dp))

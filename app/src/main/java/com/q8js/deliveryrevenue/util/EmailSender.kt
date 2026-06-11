@@ -94,4 +94,86 @@ object EmailSender {
 
         Transport.send(message)
     }
+
+    suspend fun sendDailyReportEmail(
+        cfg: AppSettings,
+        date: String,
+        normalFP: Double,
+        normalUE: Double,
+        extendedFP: Double,
+        extendedUE: Double,
+        reserveCash: Double,
+        reserveCashShort: Double,
+        drawerCash: Double,
+        expenses: List<com.q8js.deliveryrevenue.ui.ExpenseItem>,
+        totalDelivery: Double,
+        actualDrawerTotal: Double
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val props = Properties().apply {
+                put("mail.smtp.host", cfg.smtpHost.ifEmpty { "smtp.gmail.com" })
+                put("mail.smtp.port", cfg.smtpPort.toString())
+                put("mail.smtp.auth", "true")
+                put("mail.smtp.starttls.enable", "true")
+            }
+
+            val session = Session.getInstance(props, object : Authenticator() {
+                override fun getPasswordAuthentication(): PasswordAuthentication {
+                    return PasswordAuthentication(cfg.senderEmail, cfg.senderPassword)
+                }
+            })
+
+            val message = MimeMessage(session).apply {
+                setFrom(InternetAddress(cfg.senderEmail))
+                setRecipients(Message.RecipientType.TO, cfg.recipientEmail)
+                subject = "q8js_日營業額回報 $date"
+
+                val normalTotal = normalFP + normalUE
+                val extendedTotal = extendedFP + extendedUE
+
+                val expensesText = if (expenses.isEmpty()) {
+                    "無"
+                } else {
+                    expenses.mapIndexed { idx, item ->
+                        "${idx + 1}. [${item.category}]：${item.amount} 元"
+                    }.joinToString("\n")
+                }
+
+                setText("""
+                    【日營業額回報 - $date】
+
+                    【一般營業時間】
+                    FoodPanda：${String.format("%.0f", normalFP)} 元
+                    Uber Eats：${String.format("%.0f", normalUE)} 元
+                    一般營時 & 雙平台加總：${String.format("%.0f", normalTotal)} 元
+
+                    【延長營業時間】
+                    FoodPanda：${String.format("%.0f", extendedFP)} 元
+                    Uber Eats：${String.format("%.0f", extendedUE)} 元
+                    延長營時 & 雙平台加總：${String.format("%.0f", extendedTotal)} 元
+
+                    【現金與備用金】
+                    實有備用金：${String.format("%.0f", reserveCash)} 元
+                    備用金缺額：${String.format("%.0f", reserveShortTextVal(reserveCashShort))} 元
+                    收銀機現金：${String.format("%.0f", drawerCash)} 元
+
+                    【支出明細】
+                    $expensesText
+
+                    外送平台總金額：${String.format("%.0f", totalDelivery)} 元
+                    實際收銀加總 (收銀現金 + 備用金 - 支出)：${String.format("%.0f", actualDrawerTotal)} 元
+                """.trimIndent())
+            }
+
+            Transport.send(message)
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    private fun reserveShortTextVal(value: Double): Double {
+        return if (value <= 0) 0.0 else value
+    }
 }

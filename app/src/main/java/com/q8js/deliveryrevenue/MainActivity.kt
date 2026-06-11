@@ -52,7 +52,15 @@ class MainActivity : ComponentActivity() {
                 NavHost(navController = navController, startDestination = "home") {
                     composable("home") {
                         HomeScreen(
-                            onNavigateToMain = { navController.navigate("main") }
+                            onNavigateToMain = { navController.navigate("main") },
+                            onNavigateToDailyReport = { navController.navigate("daily_report") }
+                        )
+                    }
+                    composable("daily_report") {
+                        com.q8js.deliveryrevenue.ui.DailyReportScreen(
+                            appState = appState,
+                            settings = settings,
+                            onBack = { navController.popBackStack() }
                         )
                     }
                     composable("main") {
