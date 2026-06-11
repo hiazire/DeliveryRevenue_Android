@@ -13,6 +13,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.q8js.deliveryrevenue.ui.HomeScreen
 import com.q8js.deliveryrevenue.ui.MainScreen
 import com.q8js.deliveryrevenue.ui.SettingsScreen
 import com.q8js.deliveryrevenue.ui.theme.DeliveryRevenueTheme
@@ -48,7 +49,12 @@ class MainActivity : ComponentActivity() {
                 val emailState by viewModel.emailState.collectAsStateWithLifecycle()
                 val settings by viewModel.settings.collectAsStateWithLifecycle()
 
-                NavHost(navController = navController, startDestination = "main") {
+                NavHost(navController = navController, startDestination = "home") {
+                    composable("home") {
+                        HomeScreen(
+                            onNavigateToMain = { navController.navigate("main") }
+                        )
+                    }
                     composable("main") {
                         MainScreen(
                             images = images,

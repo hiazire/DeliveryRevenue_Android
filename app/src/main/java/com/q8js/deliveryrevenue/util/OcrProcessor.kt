@@ -54,8 +54,8 @@ object OcrProcessor {
         }
 
         val amounts = mutableListOf<ExtractedAmount>()
-        // 擴大容錯：只要包含 panda 或 eats 就視為平台名稱，避免反光造成些微錯字
-        val platformRegex = Regex("(?i)(panda|eats)")
+        // 擴大容錯：只要包含 panda, eats, eat 或 uber 就視為平台名稱，避免反光造成些微錯字
+        val platformRegex = Regex("(?i)(panda|eats|eat|uber)")
 
         // 1. 找出所有「外送平台名稱」的單字座標
         val platformElements = elements.filter {
@@ -68,7 +68,9 @@ object OcrProcessor {
             val platformTextNormalized = platform.text.replace(" ", "").lowercase()
             val platformType = when {
                 platformTextNormalized.contains("panda") -> PlatformType.FOODPANDA
-                platformTextNormalized.contains("eats") -> PlatformType.UBER_EATS
+                platformTextNormalized.contains("eats") || 
+                platformTextNormalized.contains("uber") || 
+                platformTextNormalized.contains("eat") -> PlatformType.UBER_EATS
                 else -> PlatformType.UNKNOWN
             }
 
@@ -78,8 +80,8 @@ object OcrProcessor {
                 // 必須在平台名稱的右邊 (使用 centerX 確保不會誤判)
                 val isToRight = elBox.centerX() > pBox.centerX()
 
-                // 必須在同一區間內 (放寬垂直容忍度到字體高度的 1.5 倍，抵抗反光造成的座標扭曲)
-                val tolerance = pBox.height() * 1.5f
+                // 必須在同一區間內 (放寬垂直容忍度到字體高度的 2.5 倍，抵抗反光與斜拍造成的座標扭曲)
+                val tolerance = pBox.height() * 2.5f
                 val isAligned = Math.abs(elBox.centerY() - pBox.centerY()) < tolerance
 
                 val isDifferent = el !== platform

@@ -29,6 +29,19 @@ val SuccessColor = Color(0xFF69F0AE)
 val TextPrimary = Color(0xFFF0E6FF)
 val TextSecondary = Color(0xFFB89FD8)
 
+// ── Nishikigoi (深澤直人 × iida INFOBAR) ──────────────────────────────────
+// 錦鯉 = 朱紅；池水 = 深藍灰；留白 = 溫白
+val NishikiRed       = Color(0xFFC0392B)   // 錦鯉本體
+val NishikiRedLight  = Color(0xFFE74C3C)   // 高光邊框
+val NishikiRedDeep   = Color(0xFF962D22)   // 按下深色
+val NishikiBlue      = Color(0xFF111B27)   // 池水深處（背景）
+val NishikiBlueLight = Color(0xFF1E2D3D)   // 水面（背景輔助）
+val NishikiWhite     = Color(0xFFF5F0EB)   // 留白 / 主文字
+val NishikiCream     = Color(0xFFEFE8DE)   // 第二按鍵（米白）
+val NishikiCreamDeep = Color(0xFFD6CECB)   // 米白按下深色
+val NishikiGold      = Color(0xFFD4A855)   // 魚鱗反光（點綴）
+val NishikiGoldFaint = Color(0x30D4A855)   // 水波 shimmer 透明金
+
 private val DarkColorScheme = darkColorScheme(
     primary = Purple80,
     onPrimary = Color(0xFF1A0050),

@@ -42,14 +42,18 @@ object EmailSender {
             subject = "q8js_外送未入機加總金額 $date"
 
             // 設定內文
+            val normalTotal = normalFoodPanda + normalUberEats
+            val extendedTotal = extendedFoodPanda + extendedUberEats
             setText("""
                 【一般營業時間】
                 FoodPanda：${String.format("%.0f", normalFoodPanda)}
                 Uber Eats：${String.format("%.0f", normalUberEats)}
+                一般營時 + 雙平台 Total：${String.format("%.0f", normalTotal)}
 
                 【延長營業時間】
                 FoodPanda：${String.format("%.0f", extendedFoodPanda)}
                 Uber Eats：${String.format("%.0f", extendedUberEats)}
+                延長營時 + 雙平台 Total：${String.format("%.0f", extendedTotal)}
 
                 外送平台總金額：${String.format("%.0f", totalAmount)}
             """.trimIndent())

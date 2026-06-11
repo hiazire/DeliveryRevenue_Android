@@ -401,29 +401,30 @@ private fun ResultPanel(
                             verticalAlignment = Alignment.Bottom
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("外送平台總金額", color = TextSecondary, fontSize = 11.sp)
+                                val normalTotal = result.normalFoodPanda + result.normalUberEats
+                                val extendedTotal = result.extendedFoodPanda + result.extendedUberEats
+                                val reportText = """
+                                    【一般營業時間】
+                                    FoodPanda：${"%.0f".format(result.normalFoodPanda)}
+                                    Uber Eats：${"%.0f".format(result.normalUberEats)}
+                                    一般營時 + 雙平台 Total：${"%.0f".format(normalTotal)}
+
+                                    【延長營業時間】
+                                    FoodPanda：${"%.0f".format(result.extendedFoodPanda)}
+                                    Uber Eats：${"%.0f".format(result.extendedUberEats)}
+                                    延長營時 + 雙平台 Total：${"%.0f".format(extendedTotal)}
+
+                                    外送平台總金額：${"%.0f".format(result.totalAmount)}
+                                """.trimIndent()
+
                                 Text(
-                                    "NT$ ${"%.2f".format(result.totalAmount)}",
-                                    color = Orange80,
-                                    fontSize = 24.sp,
-                                    fontWeight = FontWeight.ExtraBold
-                                )
-                                Spacer(Modifier.height(4.dp))
-                                Text("【一般營業時間】", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                Text(
-                                    "FoodPanda: ${"%.0f".format(result.normalFoodPanda)} | Uber Eats: ${"%.0f".format(result.normalUberEats)}",
-                                    color = TextSecondary,
-                                    fontSize = 11.sp
-                                )
-                                Spacer(Modifier.height(2.dp))
-                                Text("【延長營業時間】", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                Text(
-                                    "FoodPanda: ${"%.0f".format(result.extendedFoodPanda)} | Uber Eats: ${"%.0f".format(result.extendedUberEats)}",
-                                    color = TextSecondary,
-                                    fontSize = 11.sp
+                                    text = reportText,
+                                    color = TextPrimary,
+                                    fontSize = 12.sp,
+                                    lineHeight = 18.sp
                                 )
                                 if (result.primaryDate != null) {
-                                    Spacer(Modifier.height(4.dp))
+                                    Spacer(Modifier.height(6.dp))
                                     Text(
                                         "日期: ${result.primaryDate.format(dateFmt)}",
                                         color = TextSecondary,
